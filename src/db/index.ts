@@ -1,20 +1,27 @@
-import SqliteDb from 'better-sqlite3'
-import { Kysely, Migrator, SqliteDialect } from 'kysely'
-import { DatabaseSchema } from './schema'
-import { migrationProvider } from './migrations'
+import Redis from 'ioredis'
 
-export const createDb = (location: string): Database => {
-  return new Kysely<DatabaseSchema>({
-    dialect: new SqliteDialect({
-      database: new SqliteDb(location),
-    }),
-  })
+export class Database {
+  private redis: Redis
+
+  constructor(redis: Redis) {
+    this.redis = redis
+  }
+
+  async set(key: string, value: string) {
+    await this.redis.set(key, value)
+  }
+
+  async get(key: string): Promise<string | null> {
+    return await this.redis.get(key)
+  }
+
+  // Add other database operations as needed
+}
+
+export const createDb = (redis: Redis): Database => {
+  return new Database(redis)
 }
 
 export const migrateToLatest = async (db: Database) => {
-  const migrator = new Migrator({ db, provider: migrationProvider })
-  const { error } = await migrator.migrateToLatest()
-  if (error) throw error
+  // No migration needed for Redis
 }
-
-export type Database = Kysely<DatabaseSchema>

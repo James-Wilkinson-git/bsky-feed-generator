@@ -9,6 +9,7 @@ import { createDb, Database, migrateToLatest } from './db'
 import { FirehoseSubscription } from './subscription'
 import { AppContext, Config } from './config'
 import wellKnown from './well-known'
+import Redis from 'ioredis'
 
 export class FeedGenerator {
   public app: express.Application
@@ -16,22 +17,30 @@ export class FeedGenerator {
   public db: Database
   public firehose: FirehoseSubscription
   public cfg: Config
+  private redis: Redis
 
   constructor(
     app: express.Application,
     db: Database,
     firehose: FirehoseSubscription,
     cfg: Config,
+    redis: Redis,
   ) {
     this.app = app
     this.db = db
     this.firehose = firehose
     this.cfg = cfg
+    this.redis = redis
   }
 
-  static create(cfg: Config) {
+  static create(cfg: Config & { redisHost: string, redisPort: number, redisPassword?: string }) {
     const app = express()
-    const db = createDb(cfg.sqliteLocation)
+    const redis = new Redis({
+      host: cfg.redisHost,
+      port: cfg.redisPort,
+      password: cfg.redisPassword,
+    })
+    const db = createDb(redis)
     const firehose = new FirehoseSubscription(db, cfg.subscriptionEndpoint)
 
     const didCache = new MemoryCache()
@@ -50,6 +59,7 @@ export class FeedGenerator {
     })
     const ctx: AppContext = {
       db,
+      redis,
       didResolver,
       cfg,
     }
@@ -58,12 +68,13 @@ export class FeedGenerator {
     app.use(server.xrpc.router)
     app.use(wellKnown(ctx))
 
-    return new FeedGenerator(app, db, firehose, cfg)
+    return new FeedGenerator(app, db, firehose, cfg, redis)
   }
 
   async start(): Promise<http.Server> {
     await migrateToLatest(this.db)
     this.firehose.run(this.cfg.subscriptionReconnectDelay)
+    await this.redis.connect()
     this.server = this.app.listen(this.cfg.port, this.cfg.listenhost)
     await events.once(this.server, 'listening')
     return this.server
